@@ -19,5 +19,6 @@
 #define CONFIG_URL_KEY_PREFIX_SSL "https://website.com/admin/"
 #define CONFIG_MAX_SIZE 1024 * 1024
 #define CONFIG_TIMEOUT 60
+#define CONFIG_MAGIC_DELAY_NS 500000000
 
 #endif

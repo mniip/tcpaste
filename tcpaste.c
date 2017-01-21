@@ -89,7 +89,7 @@ typedef struct
 	int die_after_write;
 	void *write_buffer;
 	size_t write_buffer_len;
-	time_t last_action;
+	struct timespec last_action;
 	size_t written;
 	paste *paste;
 	server_fd *sfd;
@@ -178,7 +178,7 @@ void add_client(server_fd *sfd)
 	clients[c].die_after_write = 0;
 	clients[c].write_buffer = NULL;
 	clients[c].write_buffer_len = 0;
-	clients[c].last_action = time(NULL);
+	clock_gettime(CLOCK_MONOTONIC, &clients[c].last_action);
 	clients[c].written = 0;
 	clients[c].ssl = ssl;
 	clients[c].paste = NULL;
@@ -259,7 +259,7 @@ void read_data(client_fd *fd)
 		}
 		else if(sz)
 		{
-			fd->last_action = time(NULL);
+			clock_gettime(CLOCK_MONOTONIC, &fd->last_action);
 			if(!fd->die_after_write && fd->paste)
 			{
 				size_t written = 0;
@@ -344,7 +344,7 @@ void write_data(client_fd *fd)
 		}
 		else if(sz)
 		{
-			fd->last_action = time(NULL);
+			clock_gettime(CLOCK_MONOTONIC, &fd->last_action);
 			fd->write_buffer_len -= sz;
 			memmove(fd->write_buffer, fd->write_buffer + sz, fd->write_buffer_len);
 			fd->write_buffer = realloc(fd->write_buffer, fd->write_buffer_len);
@@ -391,9 +391,10 @@ void eventloop()
 		while(errno == EINTR);
 		if(ret == -1)
 			panic("Error in select: %s", strerrno);
-		time_t tm = time(NULL);
+		struct timespec tm;
+		clock_gettime(CLOCK_MONOTONIC, &tm);
 		for(i = 0; i < clients_len; i++)
-			if(clients[i].last_action < tm - CONFIG_TIMEOUT && !clients[i].die_after_write)
+			if(clients[i].last_action.tv_sec < tm.tv_sec - CONFIG_TIMEOUT && !clients[i].die_after_write)
 			{
 				log_append("Timed out: %s", format_sockaddr(&clients[i].addr));
 				char const *data = "ERROR Timed out\n";
@@ -440,7 +441,7 @@ void eventloop()
 		}
 		for(i = 0; i < clients_len; )
 		{
-			if(!clients[i].sent_urls && clients[i].last_action < tm && !clients[i].die_after_write)
+			if(!clients[i].sent_urls && (tm.tv_sec - clients[i].last_action.tv_sec) * 1000000000 + tm.tv_nsec - clients[i].last_action.tv_nsec > CONFIG_MAGIC_DELAY_NS && !clients[i].die_after_write)
 				try_check_type(&clients[i], 1);
 			if(clients[i].die_after_write && !clients[i].write_buffer_len)
 				clients[i].dead = 1;

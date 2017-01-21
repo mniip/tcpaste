@@ -2,7 +2,7 @@ CC= gcc
 
 CFLAGS= -O3 -ggdb -Wall -Wno-overflow
 CPPFLAGS=
-LDFLAGS= -lpq -lssl -lmagic
+LDFLAGS= -lpq -lssl -lmagic -lrt
 
 BINARY= tcpaste
 SOURCES= tcpaste.c logging.c pastebin.c
