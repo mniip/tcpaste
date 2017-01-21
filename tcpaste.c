@@ -463,6 +463,8 @@ SSL_CTX *new_ctx()
 	SSL_CTX *ssl = SSL_CTX_new(SSLv23_server_method());
 	if(!ssl)
 		panic("Could not initialize SSL");
+	if(!SSL_CTX_set_cipher_list(ssl, CONFIG_CIPHER_LIST))
+		panic("Could not load ciphers");
 	SSL_CTX_use_certificate_chain_file(ssl, CONFIG_CERT_FILE);
 	SSL_CTX_use_PrivateKey_file(ssl, CONFIG_KEY_FILE, SSL_FILETYPE_PEM);
 	if(!SSL_CTX_check_private_key(ssl))

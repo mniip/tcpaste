@@ -6,6 +6,7 @@
 #define CONFIG_SSL {0, 0, 1, 1}
 #define CONFIG_CERT_FILE "cert.pem"
 #define CONFIG_KEY_FILE "key.pem"
+#define CONFIG_CIPHER_LIST "EECDH+AESGCM:EDH+AESGCM:AES256+EECDH:AES256+EDH"
 #define CONFIG_READ_BUFFER 16384
 #define CONFIG_LOG "log/tcpaste.log"
 #define CONFIG_DB "dbname=tcpaste"
