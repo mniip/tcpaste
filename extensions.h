@@ -6,7 +6,7 @@
 #define HASH_PRIME 4294947451
 #define HASH_STR_QUAD(s) ((s)[0] | ((s)[0] ? (s)[1] | ((s)[1] ? (s)[2] | ((s)[2] ? (s)[3] : 0) << 8 : 0) << 8 : 0) << 8)
 
-inline uint32_t hash_str(char const *str)
+static inline uint32_t hash_str(char const *str)
 {
 	if(str[0] && str[1] && str[2] && str[3])
 		return *(uint32_t *)str + HASH_PRIME * hash_str(str + 4);
@@ -16,7 +16,7 @@ inline uint32_t hash_str(char const *str)
 
 #define H(a, b, c, d, prev) (((uint32_t)(a) | (uint32_t)(b) << 8 | (uint32_t)(c) << 16 | (uint32_t)(d) << 24) + HASH_PRIME * (prev))
 
-char const *mime_to_extension(char const *str)
+static inline char const *mime_to_extension(char const *str)
 {
 	switch(hash_str(str))
 	{
@@ -802,6 +802,8 @@ char const *mime_to_extension(char const *str)
 			return ".vivo";
 		case H('v','i','d','e',H('o','/','v','o',H('s','a','i','c',0))):
 			return ".vos";
+		case H('v','i','d','e',H('o','/','w','e',H('b','m',0,0,0))):
+			return ".webm";
 		case H('v','i','d','e',H('o','/','x','-',H('a','m','t','-',H('d','e','m','o',H('r','u','n',0,0))))):
 			return ".xdr";
 		case H('v','i','d','e',H('o','/','x','-',H('a','m','t','-',H('s','h','o','w',H('r','u','n',0,0))))):
