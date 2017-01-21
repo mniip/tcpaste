@@ -1,0 +1,20 @@
+#ifndef CONFIG_H_
+#define CONFIG_H_
+
+#define CONFIG_PORTS {10000, 10001, 10002, 10003}
+#define CONFIG_EXTS {NULL, ".txt", NULL, ".png"}
+#define CONFIG_SSL {0, 0, 1, 1}
+#define CONFIG_CERT_FILE "cert.pem"
+#define CONFIG_KEY_FILE "key.pem"
+#define CONFIG_READ_BUFFER 16384
+#define CONFIG_LOG "log/tcpaste.log"
+#define CONFIG_DB "dbname=tcpaste"
+#define CONFIG_FS_PREFIX "/var/www/data/"
+#define CONFIG_URL_ID_PREFIX "http://website.com/"
+#define CONFIG_URL_KEY_PREFIX "http://website.com/admin/"
+#define CONFIG_URL_ID_PREFIX_SSL "https://website.com/"
+#define CONFIG_URL_KEY_PREFIX_SSL "https://website.com/admin/"
+#define CONFIG_MAX_SIZE 1024 * 1024
+#define CONFIG_TIMEOUT 60
+
+#endif
