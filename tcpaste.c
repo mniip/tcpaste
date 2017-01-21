@@ -235,7 +235,7 @@ void read_data(client_fd *fd)
 			}
 		}
 		else
-			fd->dead = 1;
+			fd->die_after_write = 1;
 	}
 }
 
@@ -286,8 +286,6 @@ void write_data(client_fd *fd)
 			fd->write_buffer_len -= sz;
 			memmove(fd->write_buffer, fd->write_buffer + sz, fd->write_buffer_len);
 			fd->write_buffer = realloc(fd->write_buffer, fd->write_buffer_len);
-			if(fd->die_after_write && !fd->write_buffer_len)
-				fd->dead = 1;
 		}
 		else
 			fd->dead = 1;
@@ -313,8 +311,8 @@ void eventloop()
 		}
 		for(i = 0; i < clients_len; i++)
 		{
-			if(clients[i].ssl ? clients[i].ssl_want == SSL_ERROR_WANT_READ || clients[i].ssl_want == SSL_ERROR_NONE : 1)
-			FD_SET(clients[i].desc, &reads);
+			if(clients[i].ssl ? clients[i].ssl_want == SSL_ERROR_WANT_READ || (clients[i].ssl_want == SSL_ERROR_NONE && !clients[i].die_after_write) : !clients[i].die_after_write)
+				FD_SET(clients[i].desc, &reads);
 			if(clients[i].ssl ? clients[i].ssl_want == SSL_ERROR_WANT_WRITE || (clients[i].ssl_want == SSL_ERROR_NONE && clients[i].write_buffer_len) : clients[i].write_buffer_len)
 				FD_SET(clients[i].desc, &writes);
 			if(clients[i].desc > nfds)
@@ -379,6 +377,9 @@ void eventloop()
 			}
 		}
 		for(i = 0; i < clients_len; )
+		{
+			if(clients[i].die_after_write && !clients[i].write_buffer_len)
+				clients[i].dead = 1;
 			if(clients[i].dead)
 			{
 				log_append("Client %s disconnected", format_sockaddr(&clients[i].addr));
@@ -402,6 +403,7 @@ void eventloop()
 			}
 			else
 				i++;
+		}
 	}
 }
 
