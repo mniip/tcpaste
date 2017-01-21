@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <magic.h>
 
 #include <sys/socket.h>
 #include <sys/select.h>
@@ -17,6 +18,7 @@
 #include "array.h"
 #include "logging.h"
 #include "pastebin.h"
+#include "extensions.h"
 #include "config.h"
 
 char const *format_sockaddr(struct sockaddr_storage const *storage)
@@ -25,15 +27,33 @@ char const *format_sockaddr(struct sockaddr_storage const *storage)
 	static char ip[4096];
 	if(storage->ss_family == AF_INET)
 	{
-		struct sockaddr_in *addr = (struct sockaddr_in *)storage;
+		struct sockaddr_in const *addr = (struct sockaddr_in const *)storage;
 		snprintf(buffer, 4096, "%s:%d", inet_ntop(storage->ss_family, &addr->sin_addr, ip, 4096), ntohs(addr->sin_port));
 	}
 	else if(storage->ss_family == AF_INET6)
 	{
-		struct sockaddr_in6 *addr = (struct sockaddr_in6 *)storage;
+		struct sockaddr_in6 const *addr = (struct sockaddr_in6 const *)storage;
 		snprintf(buffer, 4096, "[%s]:%d", inet_ntop(storage->ss_family, &addr->sin6_addr, ip, 4096), ntohs(addr->sin6_port));
 	}
 	return buffer;
+}
+
+void parse_sockaddr(struct sockaddr_storage *storage, char const *str, int port)
+{
+	if(strchr(str, ':'))
+	{
+		storage->ss_family = AF_INET6;
+		struct sockaddr_in6 *addr = (struct sockaddr_in6 *)storage;
+		addr->sin6_port = htons(port);
+		inet_pton(AF_INET6, str, &addr->sin6_addr);
+	}
+	else
+	{
+		storage->ss_family = AF_INET;
+		struct sockaddr_in *addr = (struct sockaddr_in *)storage;
+		addr->sin_port = htons(port);
+		inet_pton(AF_INET, str, &addr->sin_addr);
+	}
 }
 
 char const *format_ip(struct sockaddr_storage const *storage)
@@ -72,6 +92,9 @@ typedef struct
 	time_t last_action;
 	size_t written;
 	paste *paste;
+	server_fd *sfd;
+	int sent_urls;
+	void *header;
 
 	SSL *ssl;
 	int operation;
@@ -89,11 +112,45 @@ size_t listeners_len;
 client_fd *clients;
 size_t clients_len;
 
+magic_t magic;
+
 void queue_data(client_fd *fd, void const *data, size_t len)
 {
 	fd->write_buffer_len += len;
 	fd->write_buffer = realloc(fd->write_buffer, fd->write_buffer_len);
 	memcpy(fd->write_buffer + fd->write_buffer_len - len, data, len);
+}
+
+void queue_urls(client_fd *fd, char const *ext)
+{
+	char data[4096];
+	snprintf(data, 4096, "URL %s%s%s\nADMIN %s%s\n",
+			fd->sfd->ssl ? CONFIG_URL_ID_PREFIX_SSL : CONFIG_URL_ID_PREFIX,
+			fd->paste->id,
+			ext ? ext : "",
+			fd->sfd->ssl ? CONFIG_URL_KEY_PREFIX_SSL : CONFIG_URL_KEY_PREFIX,
+			fd->paste->key
+		);
+	queue_data(fd, data, strlen(data));
+	fd->sent_urls = 1;
+}
+
+void try_check_type(client_fd *fd, int force)
+{
+	if(fd->written < CONFIG_HEADER_SIZE && !force)
+		return;
+	char const *result = magic_buffer(magic, fd->header, fd->written > CONFIG_HEADER_SIZE ? CONFIG_HEADER_SIZE : fd->written);
+	if(!result)
+	{
+		log_append("Magic autodetection failed for %s: %s", format_sockaddr(&fd->addr), magic_error(magic));
+		queue_urls(fd, NULL);
+	}
+	else
+	{
+		char const *ext = mime_to_extension(result);
+		log_append("Detected %s (%s) for %s", result, ext ? ext : "", format_sockaddr(&fd->addr));
+		queue_urls(fd, ext);
+	}
 }
 
 void add_client(server_fd *sfd)
@@ -115,6 +172,7 @@ void add_client(server_fd *sfd)
 	grow_array(sizeof(client_fd), &clients, &clients_len);
 	size_t c = clients_len - 1;
 	clients[c].desc = fd;
+	clients[c].sfd = sfd;
 	memcpy(&clients[c].addr, &storage, addrlen);
 	clients[c].dead = 0;
 	clients[c].die_after_write = 0;
@@ -124,6 +182,8 @@ void add_client(server_fd *sfd)
 	clients[c].written = 0;
 	clients[c].ssl = ssl;
 	clients[c].paste = NULL;
+	clients[c].header = NULL;
+	clients[c].sent_urls = 0;
 	if(ssl)
 	{
 		clients[c].ssl_want = SSL_ERROR_NONE;
@@ -150,15 +210,8 @@ void add_client(server_fd *sfd)
 	else
 	{
 		log_append("Assigned id %s to %s", clients[c].paste->id, format_sockaddr(&clients[c].addr));
-		char data[4096];
-		snprintf(data, 4096, "URL %s%s%s\nADMIN %s%s\n",
-				sfd->ssl ? CONFIG_URL_ID_PREFIX_SSL : CONFIG_URL_ID_PREFIX,
-				clients[c].paste->id,
-				sfd->ext ? sfd->ext : "",
-				sfd->ssl ? CONFIG_URL_KEY_PREFIX_SSL : CONFIG_URL_KEY_PREFIX,
-				clients[c].paste->key
-			);
-		queue_data(&clients[c], data, strlen(data));
+		if(!sfd->ext || *sfd->ext)
+			queue_urls(&clients[c], sfd->ext);
 	}
 }
 
@@ -224,6 +277,15 @@ void read_data(client_fd *fd)
 					written += ret;
 				}
 				while(written < sz);
+				if(!fd->sent_urls && fd->written < CONFIG_HEADER_SIZE)
+				{
+					size_t newsize = fd->written + written;
+					if(newsize > CONFIG_HEADER_SIZE)
+						newsize = CONFIG_HEADER_SIZE;
+					fd->header = realloc(fd->header, newsize);
+					memcpy(fd->header + fd->written, buffer, newsize - fd->written);
+					try_check_type(fd, 0);
+				}
 				fd->written += written;
 				if(fd->written > CONFIG_MAX_SIZE)
 				{
@@ -378,12 +440,15 @@ void eventloop()
 		}
 		for(i = 0; i < clients_len; )
 		{
+			if(!clients[i].sent_urls && clients[i].last_action < tm && !clients[i].die_after_write)
+				try_check_type(&clients[i], 1);
 			if(clients[i].die_after_write && !clients[i].write_buffer_len)
 				clients[i].dead = 1;
 			if(clients[i].dead)
 			{
 				log_append("Client %s disconnected", format_sockaddr(&clients[i].addr));
 				free(clients[i].write_buffer);
+				free(clients[i].header);
 				if(clients[i].ssl)
 				{
 					SSL_free(clients[i].ssl);
@@ -494,6 +559,11 @@ void sighup(int unused)
 int main()
 {
 	paste_init();
+	magic = magic_open(MAGIC_MIME_TYPE | MAGIC_NO_CHECK_APPTYPE | MAGIC_NO_CHECK_CDF | MAGIC_NO_CHECK_COMPRESS | MAGIC_NO_CHECK_ELF | MAGIC_NO_CHECK_ENCODING | MAGIC_NO_CHECK_TAR | MAGIC_NO_CHECK_TOKENS);
+	if(!magic)
+		panic("Could not initialize libmagic");
+	if(magic_load(magic, NULL))
+		panic("Could not load magic database: %s", magic_error(magic));
 	log_append("TCPaste initializing");
 	SSL_library_init();
 	SSL_load_error_strings();
@@ -501,11 +571,13 @@ int main()
 	int ports[] = CONFIG_PORTS;
 	char const *exts[] = CONFIG_EXTS;
 	int have_ssl[] = CONFIG_SSL;
+	char const *bindhosts[] = CONFIG_BINDHOSTS;
 	int i;
 	for(i = 0; i < sizeof ports / sizeof *ports; i++)
 	{
-		add_listener(&(struct sockaddr_in6){AF_INET6, ntohs(ports[i]), 0, in6addr_any}, sizeof(struct sockaddr_in6), exts[i], have_ssl[i] ? new_ctx() : NULL);
-		add_listener(&(struct sockaddr_in){AF_INET, ntohs(ports[i]), {INADDR_ANY}}, sizeof(struct sockaddr_in), exts[i], have_ssl[i] ? new_ctx() : NULL);
+		struct sockaddr_storage storage;
+		parse_sockaddr(&storage, bindhosts[i], ports[i]);
+		add_listener(&storage, sizeof(struct sockaddr_storage), exts[i], have_ssl[i] ? new_ctx() : NULL);
 	}
 	signal(SIGHUP, sighup);
 	eventloop();
