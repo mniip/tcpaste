@@ -137,6 +137,8 @@ void queue_urls(client_fd *fd, char const *ext)
 
 void try_check_type(client_fd *fd, int force)
 {
+	if(fd->sent_urls)
+		return;
 	if(fd->written < CONFIG_HEADER_SIZE && !force)
 		return;
 	char const *result = magic_buffer(magic, fd->header, fd->written > CONFIG_HEADER_SIZE ? CONFIG_HEADER_SIZE : fd->written);
@@ -284,9 +286,9 @@ void read_data(client_fd *fd)
 						newsize = CONFIG_HEADER_SIZE;
 					fd->header = realloc(fd->header, newsize);
 					memcpy(fd->header + fd->written, buffer, newsize - fd->written);
-					try_check_type(fd, 0);
 				}
 				fd->written += written;
+				try_check_type(fd, 0);
 				if(fd->written > CONFIG_MAX_SIZE)
 				{
 					log_append("Size limit exceeded for %s", format_sockaddr(&fd->addr));
